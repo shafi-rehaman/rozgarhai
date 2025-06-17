@@ -10,7 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User Model
 model User {
   id                String              @id @default(cuid())
   username          String              @unique
@@ -20,45 +19,21 @@ model User {
   firstName         String?
   lastName          String?
   profileImage      String?             @default("default-avatar.png")
-  country           String?
-  city              String?
-  phone             String?
   bio               String?             @db.Text
-  skills            Skill[]             @relation("UserSkills")
-  languages         UserLanguage[]
-  education         Education[]
-  website           String?
-  github            String?
-  twitter           String?
-  linkedin          String?
-  instagram         String?
   
-  // Seller specific fields
-  sellerTitle       String?
-  sellerDescription String?             @db.Text
-  completedOrders   Int                 @default(0)
-  totalEarnings     Float               @default(0)
-  availableForHire  Boolean             @default(true)
-  isVerified        Boolean             @default(false)
-  memberSince       DateTime            @default(now())
-  responseTime      Int                 @default(24) // hours
+  // Common relationships and fields
+  address           Address?
+  socialProfiles    SocialProfile?
   
   // Account status
-  walletBalance     Float               @default(0)
-  pendingAmount     Float               @default(0)
   accountStatus     AccountStatus       @default(ACTIVE)
   emailVerified     Boolean             @default(false)
   lastLogin         DateTime?
   
-  // Relationships - User as seller
-  gigsCreated       Gig[]               @relation("SellerGigs")
-  sellerOrders      Order[]             @relation("SellerOrders")
-  sellerReviews     Review[]            @relation("ReceivedReviews")
-  
-  // Relationships - User as buyer
-  buyerOrders       Order[]             @relation("BuyerOrders")
-  reviewsGiven      Review[]            @relation("GivenReviews")
-  savedGigs         Gig[]               @relation("SavedGigs")
+  // Role-specific profiles
+  buyerProfile      BuyerProfile?
+  sellerProfile     SellerProfile?
+  adminProfile      AdminProfile?
   
   // Communication
   sentMessages      Message[]           @relation("SentMessages")
@@ -66,21 +41,8 @@ model User {
   conversations     ConversationParticipant[]
   notifications     Notification[]
   
-  // Financial
-  transactions      Transaction[]
-  
-  // Reporting
-  reportsSubmitted  Report[]            @relation("ReportSubmitter")
-  reportsResolved   Report[]            @relation("ReportResolver")
-  
-  // Helpful votes on reviews
-  helpfulVotes      HelpfulVote[]
-  
   // Authentication
   refreshTokens     RefreshToken[]
-  
-  // Admin
-  reportedContent   Report[]            @relation("ReportedUser")
   
   // Timestamps
   createdAt         DateTime            @default(now())
@@ -89,6 +51,126 @@ model User {
   @@index([username])
   @@index([email])
   @@index([role])
+
+  Gig Gig[] @relation("SavedGigs")
+  HelpfulVote HelpfulVote[]
+  Transaction Transaction[]
+  Report Report[] @relation("ReportSubmitter")
+}
+
+model BuyerProfile {
+  id               String    @id @default(cuid())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String    @unique
+  
+  // Buyer-specific fields
+  totalSpent       Float     @default(0)
+  purchaseCount    Int       @default(0)
+  
+  // Relationships specific to buyers
+  orders           Order[]   @relation("BuyerOrders")
+  reviewsGiven     Review[]  @relation("GivenReviews")
+  savedGigs        Gig[]     @relation("SavedGigs")
+  
+  // Financial
+  walletBalance    Float     @default(0)
+  transactions     Transaction[]
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  @@index([userId])
+}
+
+model SellerProfile {
+  id               String    @id @default(cuid())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String    @unique
+  
+  // Seller-specific fields
+  title            String
+  description      String?   @db.Text
+  skills           Skill[]   @relation("SellerSkills")
+  languages        UserLanguage[]
+  education        Education[]
+  completedOrders  Int       @default(0)
+  totalEarnings    Float     @default(0)
+  availableForHire Boolean   @default(true)
+  isVerified       Boolean   @default(false)
+  memberSince      DateTime  @default(now())
+  responseTime     Int       @default(24) // hours
+  
+  // Relationships specific to sellers
+  gigs             Gig[]     @relation("SellerGigs")
+  orders           Order[]   @relation("SellerOrders")
+  reviews          Review[]  @relation("ReceivedReviews")
+  
+  // Financial
+  walletBalance    Float     @default(0)
+  pendingAmount    Float     @default(0)
+  transactions     Transaction[]
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  @@index([userId])
+  Skill Skill[] @relation("UserSkills")
+}
+
+model AdminProfile {
+  id               String    @id @default(cuid())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String    @unique
+  
+  // Admin-specific fields
+  adminLevel       AdminLevel @default(MODERATOR)
+  department       String?
+  permissions      String[]  // Array of permission codes
+  
+  // Admin activities
+  reportsResolved  Report[]  @relation("ReportResolver")
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([adminLevel])
+  Report Report[]
+}
+
+enum AdminLevel {
+  MODERATOR
+  MANAGER
+  SUPER_ADMIN
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String  @unique
+  country   String
+  city      String?
+  state     String?
+  zipCode   String?
+  street    String?
+  phone     String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SocialProfile {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  website   String?
+  github    String?
+  twitter   String?
+  linkedin  String?
+  instagram String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // User role enum
@@ -109,7 +191,7 @@ enum AccountStatus {
 // User language proficiency model
 model UserLanguage {
   id          String      @id @default(cuid())
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        SellerProfile        @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
   language    String
   proficiency Proficiency
@@ -128,7 +210,7 @@ enum Proficiency {
 // Education model
 model Education {
   id           String    @id @default(cuid())
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         SellerProfile      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId       String
   institution  String
   degree       String?
@@ -166,10 +248,11 @@ model Skill {
   category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
   isVerified Boolean   @default(true)
-  users      User[]    @relation("UserSkills")
+  seller      SellerProfile[]    @relation("UserSkills")
   createdAt  DateTime  @default(now())
 
   @@index([name])
+  SellerProfile SellerProfile[] @relation("SellerSkills")
 }
 
 // Gig Model
@@ -177,7 +260,7 @@ model Gig {
   id             String      @id @default(cuid())
   title          String
   slug           String      @unique
-  seller         User        @relation("SellerGigs", fields: [sellerId], references: [id])
+  seller         SellerProfile        @relation("SellerGigs", fields: [sellerId], references: [id])
   sellerId       String
   category       Category    @relation(fields: [categoryId], references: [id])
   categoryId     String
@@ -222,6 +305,7 @@ model Gig {
   @@index([status])
   @@index([title])
   @@index([title, description])
+  BuyerProfile BuyerProfile[] @relation("SavedGigs")
 }
 
 // Gig status enum
@@ -265,7 +349,7 @@ model Package {
   description  String        @db.Text
   deliveryTime Int           // days
   revisions    Int           @default(1)
-  price        Float
+  price        Decimal       @db.Decimal(10,2)
   features     String[]
   orders       Order[]
 
@@ -283,9 +367,9 @@ enum PackageType {
 model Order {
   id                  String         @id @default(cuid())
   orderNumber         String         @unique
-  buyer               User           @relation("BuyerOrders", fields: [buyerId], references: [id])
+  buyer               BuyerProfile           @relation("BuyerOrders", fields: [buyerId], references: [id])
   buyerId             String
-  seller              User           @relation("SellerOrders", fields: [sellerId], references: [id])
+  seller              SellerProfile           @relation("SellerOrders", fields: [sellerId], references: [id])
   sellerId            String
   gig                 Gig            @relation(fields: [gigId], references: [id])
   gigId               String
@@ -293,7 +377,7 @@ model Order {
   packageId           String
   quantity            Int            @default(1)
   requirements        String?        @db.Text
-  price               Float
+  price               Decimal        @db.Decimal(10,2)
   status              OrderStatus    @default(PENDING)
   
   // Timeline dates
@@ -390,9 +474,9 @@ model Review {
   id           String      @id @default(cuid())
   order        Order       @relation(fields: [orderId], references: [id])
   orderId      String      @unique
-  reviewer     User        @relation("GivenReviews", fields: [reviewerId], references: [id])
+  reviewer     BuyerProfile        @relation("GivenReviews", fields: [reviewerId], references: [id])
   reviewerId   String
-  reviewee     User        @relation("ReceivedReviews", fields: [revieweeId], references: [id])
+  reviewee     SellerProfile        @relation("ReceivedReviews", fields: [revieweeId], references: [id])
   revieweeId   String
   gig          Gig         @relation(fields: [gigId], references: [id])
   gigId        String
@@ -539,7 +623,7 @@ model Transaction {
   id              String           @id @default(cuid())
   user            User             @relation(fields: [userId], references: [id])
   userId          String
-  amount          Float
+  amount          Decimal          @db.Decimal(10,2)
   currency        String           @default("USD")
   type            TransactionType
   status          TransactionStatus @default(PENDING)
@@ -557,6 +641,8 @@ model Transaction {
   @@index([userId])
   @@index([type])
   @@index([status])
+  BuyerProfile BuyerProfile[]
+  SellerProfile SellerProfile[]
 }
 
 // Transaction type enum
@@ -623,14 +709,15 @@ enum NotificationType {
   SYSTEM_ALERT
 }
 
-// Report Model
+// // Report Model
 model Report {
   id             String       @id @default(cuid())
-  reporter       User         @relation("ReportSubmitter", fields: [reporterId], references: [id])
+  reporter       User         @relation("ReportSubmitter", fields: [reporterId], references: [id], onDelete: Cascade)
   reporterId     String
   
   // Reported content (only one of these will be set)
-  reportedUser   User?        @relation("ReportedUser", fields: [reportedUserId], references: [id])
+  // resolvedReports   User?        @relation("ReportResolver", fields: [reportedUserId], references: [id], onDelete: Cascade)
+
   reportedUserId String?
   reportedGig    Gig?         @relation("ReportedGig", fields: [reportedGigId], references: [id])
   reportedGigId  String?
@@ -639,21 +726,22 @@ model Report {
   reportedMessage Message?    @relation("ReportedMessage", fields: [reportedMessageId], references: [id])
   reportedMessageId String?
   
-  reason         ReportReason
+  // reason         ReportReason
   description    String       @db.Text
   evidence       String[]
   status         ReportStatus @default(PENDING)
   adminNotes     String?      @db.Text
   actionTaken    String?
-  resolvedBy     User?        @relation("ReportResolver", fields: [resolvedById], references: [id])
+  resolvedBy     AdminProfile?  @relation(fields: [resolvedById], references: [id])
   resolvedById   String?
   resolvedAt     DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([status])
+  AdminProfile AdminProfile[] @relation("ReportResolver")
 }
 
-// Report reason enum
+// // Report reason enum
 enum ReportReason {
   SPAM
   INAPPROPRIATE_CONTENT
@@ -665,7 +753,7 @@ enum ReportReason {
   OTHER
 }
 
-// Report status enum
+// // Report status enum
 enum ReportStatus {
   PENDING
   INVESTIGATING

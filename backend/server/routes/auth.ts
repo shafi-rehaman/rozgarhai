@@ -11,88 +11,119 @@ const prisma = new PrismaClient();
 
 // Validation schemas
 const registerSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
-  username: z.string().min(2, "Username must be at least 2 characters"),
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  role: z.enum(["FREELANCER", "CLIENT"]).optional(),
+  username: z.string().min(3).max(30),
+  email: z.string().email(),
+  password: z.string().min(8).max(100),
+  firstName: z.string().max(50).optional(),
+  lastName: z.string().max(50).optional(),
+  role: z.enum(['BUYER', 'SELLER']).default('BUYER'),
 });
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
+  email: z.string().email(),
+  password: z.string().min(8).max(100),
 });
 
+// Token generation function
+const generateTokens = (userId: string, role: string) => {
+  const accessToken = jwt.sign(
+    { userId, role },
+    process.env.ACCESS_TOKEN_SECRET!,
+    { expiresIn: '15m' }
+  );
+  
+  const refreshToken = jwt.sign(
+    { userId, role },
+    process.env.REFRESH_TOKEN_SECRET!,
+    { expiresIn: '7d' }
+  );
+
+  return { accessToken, refreshToken };
+};
 // @route   POST /api/auth/register
 // @desc    Register a new user
 // @access  Public
 router.post("/register", validate(registerSchema), async (req, res, next) => {
   try {
-    const { name, username, email, password, role } = req.body;
+    const { username, email, password, firstName, lastName, role } = req.body;
 
-    // Check if user exists
-    const userExists = await prisma.user.findUnique({
-      where: { email },
+    // Check if user already exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username },
+          { email },
+        ],
+      },
     });
 
-    if (userExists) {
-      const error = new Error("User already exists") as CustomError;
-      error.statusCode = 400;
-      throw error;
+    if (existingUser) {
+      throw new Error('Username or email already in use') as CustomError;
     }
 
     // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user
     const user = await prisma.user.create({
       data: {
-        name,
         username,
         email,
         password: hashedPassword,
-        role: role || "FREELANCER",
-      },
-      select: {
-        id: true,
-        name: true,
-        username: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-        freelancerProfile: true,
-        clientProfile: true,
+        firstName,
+        lastName,
+        role,
+        ...(role === 'SELLER' && {
+          sellerProfile: {
+            create: {
+              title: 'New Seller',
+              description: 'I am a new seller on this platform',
+            },
+          },
+        }),
+        ...(role === 'BUYER' && {
+          buyerProfile: {
+            create: {},
+          },
+        }),
       },
     });
 
-    // Create token
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, {
-      expiresIn: "30d",
+    // Generate tokens
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+
+    // Store refresh token in database
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
     });
 
-    // Calculate token expiration
-    const tokenExpiration = new Date();
-    tokenExpiration.setDate(tokenExpiration.getDate() + 30);
+    // Set refresh token as HTTP-only cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // Return user data (excluding password) and access token
+    const userData = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      accessToken,
+    };
 
     res.status(201).json({
       success: true,
-      message: "User registered successfully",
-      data: {
-        user: {
-          id: user.id,
-          name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-          username: user.username,
-          email: user.email,
-          role: user.role,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-          profile:user.role || "FREELANCER"
-        },
-        token,
-        tokenExpiration: tokenExpiration.toISOString(),
-      },
+      refreshToken: refreshToken,
+      data: userData,
     });
   } catch (error) {
     next(error);
@@ -106,69 +137,161 @@ router.post("/login", validate(loginSchema), async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    // Check if user exists
+    // Find user by email
     const user = await prisma.user.findUnique({
       where: { email },
-      select: {
-        id: true,
-        firstName: true,
-        email: true,
-        password: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-        freelancerProfile: true,
-        clientProfile: true,
+      include: {
+        buyerProfile: true,
+        sellerProfile: true,
       },
     });
+
+
 
     if (!user) {
-      const error = new Error("Invalid credentials") as CustomError;
-      error.statusCode = 401;
-      throw error;
+      throw new Error('Invalid credentials') as CustomError;
+    }
+    
+
+    // Check if account is active
+    if (user.accountStatus !== 'ACTIVE') {
+      throw new Error('Account is not active' ) as CustomError;
     }
 
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-
-    if (!isMatch) {
-      const error = new Error("Invalid credentials") as CustomError;
-      error.statusCode = 401;
-      throw error;
+    // Verify password
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
+      throw new Error('Invalid credentials') as CustomError;
     }
+    
+    // Generate tokens
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+    console.log(password)
 
-    // Create token
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, {
-      expiresIn: "30d",
+    // Store refresh token in database
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
     });
 
-    // Calculate token expiration
-    const tokenExpiration = new Date();
-    tokenExpiration.setDate(tokenExpiration.getDate() + 30);
+    // Set refresh token as HTTP-only cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
 
-    res.json({
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    });
+
+    // Return user data (excluding password) and access token
+    const userData = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      profile: user.role === 'BUYER' ? user.buyerProfile : user.sellerProfile,
+      accessToken,
+    };
+
+    res.status(200).json({
       success: true,
-      message: "Login successful",
-      data: {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-          profile:
-            user.role === "FREELANCER"
-              ? user.freelancerProfile
-              : user.clientProfile,
-        },
-        token,
-        tokenExpiration: tokenExpiration.toISOString(),
-      },
+      refreshToken: refreshToken,
+      data: userData,
     });
   } catch (error) {
     next(error);
   }
+  
 });
+
+router.get("/logout", async(req, res, next) => {
+  try {
+    const refreshToken = req.headers.cookie?.split('=')[1]
+
+    if (!refreshToken) {
+      return res.status(204).json({ success: true });
+    }
+
+    // Delete refresh token from database
+    await prisma.refreshToken.deleteMany({
+      where: {
+        token: refreshToken,
+      },
+    });
+
+    // Clear cookie
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+    });
+
+
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    next(error);
+  }
+})
+
+
+router.get("/refresh-token", async (req, res, next) =>{
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      throw new Error('Refresh token is required')as CustomError;
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!) as {
+      userId: string;
+      role: string;
+    };
+
+    // Check if token exists in database
+    const storedToken = await prisma.refreshToken.findFirst({
+      where: {
+        token: refreshToken,
+        userId: decoded.userId,
+      },
+    });
+
+    if (!storedToken) {
+      throw new Error('Invalid refresh token') as CustomError;
+    }
+
+    // Check if token is expired
+    if (storedToken.expires < new Date()) {
+      await prisma.refreshToken.delete({
+        where: { id: storedToken.id },
+      });
+      throw new Error('Refresh token expired')as CustomError;
+    }
+
+    // Generate new access token
+    const accessToken = jwt.sign(
+      { userId: decoded.userId, role: decoded.role },
+      process.env.ACCESS_TOKEN_SECRET!,
+      { expiresIn: '15m' }
+    );
+
+    res.status(200).json({
+      success: true,
+      data: { accessToken },
+    });
+  } catch (error) {
+    next(error);
+  }
+})
 
 export default router;
