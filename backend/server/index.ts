@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { errorHandler } from './middleware/errorHandler';
+import {errorHandler} from './middleware/errorHandler';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import projectRoutes from './routes/projects';

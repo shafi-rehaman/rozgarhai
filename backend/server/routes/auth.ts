@@ -82,16 +82,13 @@ router.post("/register", validate(registerSchema), async (req, res, next) => {
       data: {
         user: {
           id: user.id,
-          name: user.name,
+          name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
           username: user.username,
           email: user.email,
           role: user.role,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
-          profile:
-            user.role === "FREELANCER"
-              ? user.freelancerProfile
-              : user.clientProfile,
+          profile:user.role || "FREELANCER"
         },
         token,
         tokenExpiration: tokenExpiration.toISOString(),
@@ -114,7 +111,7 @@ router.post("/login", validate(loginSchema), async (req, res, next) => {
       where: { email },
       select: {
         id: true,
-        name: true,
+        firstName: true,
         email: true,
         password: true,
         role: true,
